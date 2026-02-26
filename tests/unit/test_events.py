@@ -2,7 +2,8 @@
 Unit tests for event management
 """
 
-from datetime import datetime, timedelta
+import re
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -409,6 +410,76 @@ END:VEVENT"""
         assert "Updated Title" in saved_data
         assert "Updated Description" in saved_data
         assert "Original Location" in saved_data  # Unchanged field
+
+    def test_update_event_last_modified_rfc5545_format_when_already_present(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """When event already has LAST-MODIFIED, update must still serialize it as YYYYMMDDTHHmmssZ (RFC 5545)."""
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-123")
+        event.add("summary", "Original")
+        event.add("dtstart", datetime.now(timezone.utc))
+        event.add("dtend", datetime.now(timezone.utc) + timedelta(hours=1))
+        event.add("last-modified", datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+        mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-123",
+            summary="Updated",
+        )
+
+        mock_caldav_event.save.assert_called_once()
+        saved_data = mock_caldav_event.data
+        match = re.search(r"LAST-MODIFIED:(\S+)", saved_data)
+        assert match, "LAST-MODIFIED should be present after update"
+        value = match.group(1).strip()
+        assert re.fullmatch(
+            r"\d{8}T\d{6}Z", value
+        ), f"LAST-MODIFIED must be YYYYMMDDTHHmmssZ per RFC 5545, got {value!r}"
+
+    def test_update_event_last_modified_rfc5545_format_when_absent(
+        self, mock_calendar_manager, mock_calendar
+    ):
+        """When event has no LAST-MODIFIED, update must add it as YYYYMMDDTHHmmssZ (RFC 5545)."""
+        mock_calendar_manager.get_calendar.return_value = mock_calendar
+
+        mock_caldav_event = MagicMock()
+        cal = iCalendar()
+        event = iEvent()
+        event.add("uid", "evt-123")
+        event.add("summary", "Original")
+        event.add("dtstart", datetime.now(timezone.utc))
+        event.add("dtend", datetime.now(timezone.utc) + timedelta(hours=1))
+        # No last-modified on purpose
+        cal.add_component(event)
+
+        mock_caldav_event.data = cal.to_ical().decode("utf-8")
+        mock_calendar.event_by_uid.return_value = mock_caldav_event
+
+        mgr = EventManager(mock_calendar_manager)
+        mgr.update_event(
+            calendar_uid="cal-123",
+            event_uid="evt-123",
+            summary="Updated",
+        )
+
+        mock_caldav_event.save.assert_called_once()
+        saved_data = mock_caldav_event.data
+        match = re.search(r"LAST-MODIFIED:(\S+)", saved_data)
+        assert match, "LAST-MODIFIED should be present after update"
+        value = match.group(1).strip()
+        assert re.fullmatch(
+            r"\d{8}T\d{6}Z", value
+        ), f"LAST-MODIFIED must be YYYYMMDDTHHmmssZ per RFC 5545, got {value!r}"
 
     def test_update_event_partial_update(self, mock_calendar_manager, mock_calendar):
         """Test updating only specific fields"""

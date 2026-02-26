@@ -492,8 +492,10 @@ class EventManager:
                     alarm.add("description", existing_event.get("summary", ""))
                     existing_event.add_component(alarm)
 
-            # Update last-modified timestamp
-            existing_event["last-modified"] = datetime.now(timezone.utc)
+            # Update last-modified timestamp (use .add() so icalendar encodes as YYYYMMDDTHHmmssZ per RFC 5545)
+            if "last-modified" in existing_event:
+                del existing_event["last-modified"]
+            existing_event.add("last-modified", datetime.now(timezone.utc))
 
             # Save the updated event
             caldav_event.data = ical.to_ical().decode("utf-8")
